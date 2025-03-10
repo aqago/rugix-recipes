@@ -1,0 +1,16 @@
+[Unit]
+Description=Aqago Agent
+After=network.target
+
+[Service]
+Type=exec
+PIDFile=/run/aqago-agent.pid
+ExecStart=/usr/bin/aqago-agent run
+ExecStop=-/sbin/start-stop-daemon --quiet --stop --retry QUIT/5 --pidfile /run/aqago-agent.pid
+TimeoutStopSec=5
+KillMode=mixed
+Restart=on-failure
+RestartSec=60s
+
+[Install]
+WantedBy=multi-user.target

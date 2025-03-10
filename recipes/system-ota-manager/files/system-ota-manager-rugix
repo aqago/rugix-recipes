@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+
+import typing as t
+
+import json
+import pathlib
+import subprocess
+import sys
+
+
+SYSTEM_BUILD_INFO_PATH = pathlib.Path("/etc/rugix/system-build-info.json")
+
+
+def load_system_build_info() -> t.Any:
+    return json.loads(SYSTEM_BUILD_INFO_PATH.read_text())
+
+
+def main():
+    system_build_info = load_system_build_info()
+    system_name = system_build_info["name"]
+    release_id = system_build_info["release"]["id"]
+
+    print(f"system release id: {release_id}")
+
+    application = json.loads(
+        subprocess.check_output(
+            ["aqago-agent", "get-application", "system-ota-manager-rugix"]
+        ).decode()
+    )
+    reference = None
+    for resource in application["resources"]:
+        if resource["type"] != "artifact":
+            continue
+        if not resource["reference"] == f"rugix-os-bundle:latest~{system_name}":
+            continue
+        reference = resource["reference"]
+        print(f"found artifact {repr(reference)}")
+        break
+
+    if reference is None:
+        raise Exception(
+            f"artifact with reference 'rugix-os-bundle:latest~{system_name}' not found"
+        )
+    artifact = json.loads(
+        subprocess.check_output(["aqago-agent", "get-artifact", reference]).decode()
+    )
+    artifact_release_id = artifact["metadata"]["rugix.release.id"]
+
+    print(f"artifact release id: {artifact_release_id}")
+
+    if artifact_release_id == release_id:
+        print("nothing to install")
+        sys.exit(0)
+
+    bundle_url = artifact["get"]
+    bundle_hash = artifact["metadata"]["rugix.bundle.hash"]
+    subprocess.check_call(
+        [
+            "rugix-ctrl",
+            "update",
+            "install",
+            "--verify-bundle",
+            bundle_hash,
+            bundle_url,
+        ]
+    )
+
+
+if __name__ == "__main__":
+    main()

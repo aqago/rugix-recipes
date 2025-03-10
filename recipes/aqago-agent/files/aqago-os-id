@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+RUGIX_RELEASE_ID=$(jq -r ".release.id" < /etc/rugix/system-build-info.json)
+
+echo "$RUGIX_RELEASE_ID"

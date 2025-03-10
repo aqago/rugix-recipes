@@ -1,0 +1,10 @@
+[Unit]
+Description=Launch %i service every 2 hours
+
+[Timer]
+OnBootSec=30min
+OnUnitInactiveSec=2h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
