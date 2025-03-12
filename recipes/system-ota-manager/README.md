@@ -42,8 +42,7 @@ external repository in `rugix-bakery.toml`, then add the recipe to your layer's
 
 To provision the application's supporting infrastructure in the Aqago backend,
 run the included `aqago-infra.sh` bash script. Note you must configure the
-`aqago-cli` via `aqago-cli configure` and add a value to the `DEVICE_ID`
-variable in the script before running it.
+`aqago-cli` via `aqago-cli configure` before running the script.
 
 ## Operation
 
