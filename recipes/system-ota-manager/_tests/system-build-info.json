@@ -1,0 +1,7 @@
+{
+    "name": "efi-arm64",
+    "release": {
+        "id": "fake-release-id",
+        "version": "0.1.0"
+    }
+}

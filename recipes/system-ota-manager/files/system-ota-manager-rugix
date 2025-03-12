@@ -1,50 +1,129 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import typing as t
 
+import argparse
 import json
+import os
 import pathlib
 import subprocess
 import sys
 
 
-SYSTEM_BUILD_INFO_PATH = pathlib.Path("/etc/rugix/system-build-info.json")
+Config = t.TypeVar("Config")
 
 
-def load_system_build_info() -> t.Any:
+class Application(t.TypedDict, t.Generic[Config]):
+    reference: str
+    deployment: str
+    configuration: ApplicationConfiguration[Config] | None
+    resources: list[ArtifactResource]
+
+
+class ArtifactResource(t.TypedDict):
+    type: t.Literal["artifact"]
+    reference: str
+
+
+class ApplicationConfiguration(t.TypedDict, t.Generic[Config]):
+    schema: t.Any
+    default: t.Any
+    overrides: t.Any
+    merged: Config
+
+
+class Artifact(t.TypedDict):
+    id: str
+    name: str
+    url: str
+    digest: str
+    get: str
+    tags: list[str] | None
+    variant: str | None
+    metadata: t.Dict[str, t.Any] | None
+
+
+class Configuration(t.TypedDict):
+    artifact: str
+    interval: float | int
+
+
+RugixOtaApplication = Application[Configuration]
+
+
+class SystemBuildInfoSchema(t.TypedDict):
+    name: str
+    release: SystemBuildReleaseSchema
+
+
+class SystemBuildReleaseSchema(t.TypedDict):
+    id: str
+    version: str
+
+
+APPLICATION_NAME = "system-ota-manager-rugix"
+
+AQAGO_AGENT = os.environ.get("AQAGO_AGENT", None) or "aqago-agent"
+RUGIX_CTRL = os.environ.get("RUGIX_CTRL", None) or "rugix-ctrl"
+
+SYSTEM_BUILD_INFO_PATH = pathlib.Path(
+    os.environ.get("RUGIX_SYSTEM_BUILD_INFO", "/etc/rugix/system-build-info.json")
+)
+
+
+def load_system_build_info() -> SystemBuildInfoSchema:
     return json.loads(SYSTEM_BUILD_INFO_PATH.read_text())
 
 
-def main():
+def get_application() -> RugixOtaApplication:
+    return json.loads(
+        subprocess.check_output(
+            [AQAGO_AGENT, "get-application", APPLICATION_NAME]
+        ).decode()
+    )
+
+
+def get_artifact(reference: str) -> Artifact:
+    return json.loads(
+        subprocess.check_output([AQAGO_AGENT, "get-artifact", reference]).decode()
+    )
+
+
+def update_now():
     system_build_info = load_system_build_info()
     system_name = system_build_info["name"]
     release_id = system_build_info["release"]["id"]
 
     print(f"system release id: {release_id}")
 
-    application = json.loads(
-        subprocess.check_output(
-            ["aqago-agent", "get-application", "system-ota-manager-rugix"]
-        ).decode()
-    )
-    reference = None
-    for resource in application["resources"]:
-        if resource["type"] != "artifact":
-            continue
-        if not resource["reference"] == f"rugix-os-bundle:latest~{system_name}":
-            continue
-        reference = resource["reference"]
-        print(f"found artifact {repr(reference)}")
-        break
+    application = get_application()
+    configuration = application["configuration"]
 
-    if reference is None:
-        raise Exception(
-            f"artifact with reference 'rugix-os-bundle:latest~{system_name}' not found"
-        )
-    artifact = json.loads(
-        subprocess.check_output(["aqago-agent", "get-artifact", reference]).decode()
-    )
-    artifact_release_id = artifact["metadata"]["rugix.release.id"]
+    if configuration is None:
+        raise Exception("application requires a configuration")
+        return
+
+    merged = configuration["merged"]
+    artifact_ref = f"{merged['artifact']}~{system_name}"
+
+    print(f"configured artifact reference: {artifact_ref}")
+
+    for resource in application["resources"]:
+        if resource["type"] == "artifact" and resource["reference"] == artifact_ref:
+            break
+    else:
+        raise Exception(f"artifact with reference '{artifact_ref}' not found")
+
+    artifact = get_artifact(artifact_ref)
+    metadata = artifact["metadata"]
+
+    if metadata is None:
+        raise Exception("artifact does not contain any metadata")
+        return
+
+    artifact_release_id = metadata["rugix.release.id"]
 
     print(f"artifact release id: {artifact_release_id}")
 
@@ -53,10 +132,10 @@ def main():
         sys.exit(0)
 
     bundle_url = artifact["get"]
-    bundle_hash = artifact["metadata"]["rugix.bundle.hash"]
+    bundle_hash = metadata["rugix.bundle.hash"]
     subprocess.check_call(
         [
-            "rugix-ctrl",
+            RUGIX_CTRL,
             "update",
             "install",
             "--verify-bundle",
@@ -64,6 +143,34 @@ def main():
             bundle_url,
         ]
     )
+
+
+def cmd_update_now(_: argparse.Namespace) -> None:
+    update_now()
+
+
+def cmd_run(_: argparse.Namespace) -> None:
+    raise NotImplementedError("not implemented yet")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Aqago application for installing updates with Rugix."
+    )
+    subparsers = parser.add_subparsers()
+
+    update_now_parser = subparsers.add_parser(
+        "update-now", description="Check for updates and install them immediately."
+    )
+    update_now_parser.set_defaults(handler=cmd_update_now)
+
+    run_parser = subparsers.add_parser(
+        "run", description="Periodically check and install updates as configured."
+    )
+    run_parser.set_defaults(handler=cmd_run)
+
+    args = parser.parse_args()
+    args.handler(args)
 
 
 if __name__ == "__main__":
